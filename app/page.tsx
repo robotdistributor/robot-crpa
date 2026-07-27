@@ -56,12 +56,19 @@ function SurveyCard({ survey }: { survey: Survey }) {
 export default async function HomePage() {
   const supabase = await createClient()
 
-  const [{ data: contentRows }, { data: surveys }, { data: polls }, { data: responseCounts }] = await Promise.all([
+  const [{ data: contentRows }, { data: surveys }, { data: polls }, { data: responseCounts }, { data: { user } }] = await Promise.all([
     supabase.from('site_content').select('key, value').in('key', ['homepage.hero.title', 'homepage.hero.subtitle']),
     supabase.from('surveys').select('id, slug, title, description, status, category').order('title'),
     supabase.from('poll_questions').select('id, question, option_a, option_b, created_at').eq('is_open', true).order('created_at', { ascending: false }),
     supabase.from('survey_response_counts').select('survey_id, total_responses'),
+    supabase.auth.getUser(),
   ])
+
+  let isAdmin = false
+  if (user) {
+    const { data: profile } = await supabase.from('users').select('role').eq('id', user.id).single()
+    isAdmin = profile?.role === 'admin'
+  }
 
   const content = Object.fromEntries((contentRows ?? []).map((r) => [r.key, r.value]))
   const heroTitle = content['homepage.hero.title'] ?? 'Canadians Have the Right to Remain Informed'
@@ -69,7 +76,6 @@ export default async function HomePage() {
     content['homepage.hero.subtitle'] ??
     "A verified, aggregate record of Canadians' experiences with public institutions \u2014 from child protection to family courts \u2014 collected through anonymous surveys and polls."
 
-  // Roll response counts up by category using each survey's category assignment
   const countBySurvey = new Map((responseCounts as ResponseCount[] ?? []).map((r) => [r.survey_id, r.total_responses]))
   const categoryTotals = new Map<string, number>()
   for (const s of (surveys as Survey[]) ?? []) {
@@ -93,9 +99,21 @@ export default async function HomePage() {
           <a href="#surveys" className="text-white/85 hover:text-white">Surveys</a>
           <a href="/about" className="text-white/85 hover:text-white">About</a>
         </div>
-        <div className="flex gap-3">
-          <button className="text-sm font-medium text-white border border-white/30 rounded-md px-5 py-2 hover:border-white/60">Log In</button>
-          <button className="text-sm font-medium bg-white text-[#0f3460] rounded-md px-5 py-2 hover:bg-gray-100">Sign Up</button>
+        <div className="flex items-center gap-3">
+          {user ? (
+            <>
+              <span className="text-xs text-white/60 hidden sm:inline">{user.email}</span>
+              {isAdmin && (
+                <a href="/admin" className="text-sm font-medium bg-white text-[#0f3460] rounded-md px-5 py-2 hover:bg-gray-100">
+                  Admin
+                </a>
+              )}
+            </>
+          ) : (
+            <a href="/login" className="text-sm font-medium text-white border border-white/30 rounded-md px-5 py-2 hover:border-white/60">
+              Log In
+            </a>
+          )}
         </div>
       </nav>
 
