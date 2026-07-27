@@ -1,9 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
 
 type Poll = { id: string; question: string; option_a: string; option_b: string; created_at: string }
-type Survey = { id: string; slug: string; title: string; description: string; status: string }
+type Survey = { id: string; slug: string; title: string; description: string; status: string; category: string | null }
+type ResponseCount = { survey_id: string; total_responses: number }
 
 const badgeClass = 'bg-gradient-to-r from-[#667eea] to-[#764ba2]'
+
+const categoryMeta: Record<string, { label: string; icon: string; grad: string }> = {
+  child_protection: { label: 'Child Protection', icon: '\u{1F6E1}', grad: 'from-[#667eea] to-[#764ba2]' },
+  family_court: { label: 'Family Court', icon: '\u2696', grad: 'from-[#11998e] to-[#38ef7d]' },
+  legal_services: { label: 'Legal Services', icon: '\u2696', grad: 'from-[#fc4a1a] to-[#f7b733]' },
+  legal_aid: { label: 'Legal Aid', icon: '\u{1F3DB}', grad: 'from-[#141e30] to-[#243b55]' },
+  education: { label: 'Education', icon: '\u{1F3EB}', grad: 'from-[#8e44ad] to-[#9b59b6]' },
+}
 
 function PollCard({ poll }: { poll: Poll }) {
   return (
@@ -47,10 +56,11 @@ function SurveyCard({ survey }: { survey: Survey }) {
 export default async function HomePage() {
   const supabase = await createClient()
 
-  const [{ data: contentRows }, { data: surveys }, { data: polls }] = await Promise.all([
+  const [{ data: contentRows }, { data: surveys }, { data: polls }, { data: responseCounts }] = await Promise.all([
     supabase.from('site_content').select('key, value').in('key', ['homepage.hero.title', 'homepage.hero.subtitle']),
-    supabase.from('surveys').select('id, slug, title, description, status').order('title'),
+    supabase.from('surveys').select('id, slug, title, description, status, category').order('title'),
     supabase.from('poll_questions').select('id, question, option_a, option_b, created_at').eq('is_open', true).order('created_at', { ascending: false }),
+    supabase.from('survey_response_counts').select('survey_id, total_responses'),
   ])
 
   const content = Object.fromEntries((contentRows ?? []).map((r) => [r.key, r.value]))
@@ -58,6 +68,18 @@ export default async function HomePage() {
   const heroSubtitle =
     content['homepage.hero.subtitle'] ??
     "A verified, aggregate record of Canadians' experiences with public institutions \u2014 from child protection to family courts \u2014 collected through anonymous surveys and polls."
+
+  // Roll response counts up by category using each survey's category assignment
+  const countBySurvey = new Map((responseCounts as ResponseCount[] ?? []).map((r) => [r.survey_id, r.total_responses]))
+  const categoryTotals = new Map<string, number>()
+  for (const s of (surveys as Survey[]) ?? []) {
+    if (!s.category) continue
+    const count = countBySurvey.get(s.id) ?? 0
+    categoryTotals.set(s.category, (categoryTotals.get(s.category) ?? 0) + count)
+  }
+  const categories = Object.keys(categoryMeta)
+    .map((key) => ({ key, ...categoryMeta[key], count: categoryTotals.get(key) ?? 0 }))
+    .filter((c) => c.count > 0 || (surveys ?? []).some((s: any) => s.category === c.key))
 
   return (
     <main>
@@ -81,6 +103,28 @@ export default async function HomePage() {
         <h1 className="text-3xl md:text-4xl font-bold text-white mb-4 leading-tight whitespace-pre-line">{heroTitle}</h1>
         <p className="text-lg text-white/70 max-w-2xl mx-auto">{heroSubtitle}</p>
       </section>
+
+      {categories.length > 0 && (
+        <section className="py-16 px-8">
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-2xl font-bold text-[#0f3460] text-center mb-2">Browse Surveys by Category</h2>
+            <p className="text-sm text-gray-500 text-center mb-10">
+              Response counts below are real, aggregate totals \u2014 no individual identities are published.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {categories.map((c) => (
+                <div key={c.key} className="bg-white rounded-xl border border-gray-200 p-7 text-center shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all">
+                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${c.grad} flex items-center justify-center text-2xl mx-auto mb-4`}>
+                    {c.icon}
+                  </div>
+                  <h3 className="text-[15px] font-semibold text-[#0f3460] mb-1">{c.label}</h3>
+                  <p className="text-[13px] text-gray-400">{c.count.toLocaleString()} responses</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="py-16 px-8 bg-white">
         <div className="max-w-6xl mx-auto">
